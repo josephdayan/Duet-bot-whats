@@ -211,3 +211,93 @@ test('publicUrl usa cabeçalhos do proxy e respeita PUBLIC_URL', () => {
   assert.equal(publicUrl('http://internal/api/whatsapp?a=1', h), 'https://wa.vercel.app/api/whatsapp?a=1');
   assert.equal(publicUrl('http://internal/api/whatsapp', h, 'https://x.y/api/whatsapp'), 'https://x.y/api/whatsapp');
 });
+
+// ---- Conversa: encaminhado + contexto no mesmo fio do Gmail ----
+import { findConversation } from '../lib/core.js';
+
+function messagesApi(list) {
+  return async (url) => {
+    if (String(url).includes('/Messages.json')) return Response.json({ messages: list });
+    return new Response(Buffer.from('img'), { status: 200 });
+  };
+}
+const NOW = new Date('2026-11-25T22:00:00Z');
+const at = (min) => new Date(NOW.getTime() - min * 60000).toUTCString();
+const base = { From: 'whatsapp:+5511999990000', To: 'whatsapp:+14155238886', NumMedia: '0' };
+
+test('findConversation junta mensagens com intervalo menor que o limite', async () => {
+  const msg = parseInbound({ ...base, MessageSid: 'SM_C', Body: 'isso é do fornecedor X' });
+  const list = [
+    { sid: 'SM_C', date_created: at(0), body: 'isso é do fornecedor X', num_media: '0' },
+    { sid: 'SM_B', date_created: at(2), body: '', num_media: '1' },
+    { sid: 'SM_A', date_created: at(10), body: 'PI nova do Marcelo', num_media: '0' },
+    { sid: 'SM_OLD', date_created: at(120), body: 'coisa antiga', num_media: '0' },
+  ];
+  const c = await findConversation({ accountSid: SID, authToken: TOKEN, msg, now: NOW, gapMinutes: 30, fetchImpl: messagesApi(list) });
+  assert.equal(c.rootSid, 'SM_A');
+  assert.equal(c.position, 3);
+  assert.equal(c.rootPreview, 'PI nova do Marcelo');
+});
+
+test('findConversation começa conversa nova depois de um intervalo grande', async () => {
+  const msg = parseInbound({ ...base, MessageSid: 'SM_NEW', NumMedia: '1', MediaUrl0: 'https://api.twilio.com/x', MediaContentType0: 'image/jpeg' });
+  const c = await findConversation({
+    accountSid: SID, authToken: TOKEN, msg, now: NOW, gapMinutes: 30,
+    fetchImpl: messagesApi([{ sid: 'SM_OLD', date_created: at(45), body: 'x', num_media: '0' }]),
+  });
+  assert.equal(c.rootSid, 'SM_NEW');
+  assert.equal(c.position, 1);
+  assert.equal(c.rootPreview, 'mídia');
+});
+
+test('assunto do fio é igual na primeira mensagem e no contexto que vem depois', async () => {
+  const send = async (params, list) => {
+    const sent = [];
+    const rawBody = new URLSearchParams(params).toString();
+    await handleWebhook({
+      url: URL_, rawBody, signature: computeTwilioSignature(TOKEN, URL_, parseForm(rawBody)), env: ENV,
+      sendMail: async (m) => sent.push(m), fetchImpl: messagesApi(list), now: () => NOW, log: silent,
+    });
+    return sent[0];
+  };
+  const first = await send(
+    { ...base, AccountSid: SID, MessageSid: 'SM00000000000000000000000000000AAAA', NumMedia: '1', MediaUrl0: 'https://api.twilio.com/m', MediaContentType0: 'application/pdf', Forwarded: 'true' },
+    [],
+  );
+  const second = await send(
+    { ...base, AccountSid: SID, MessageSid: 'SM00000000000000000000000000000BBBB', Body: 'contexto: é a PI que o Marcelo pediu' },
+    [{ sid: 'SM00000000000000000000000000000AAAA', date_created: at(3), body: '', num_media: '1' }],
+  );
+  assert.equal(first.subject, '[WA fwd] mídia · #AAAA');
+  assert.equal(second.subject, first.subject);
+  assert.equal(first.messageId, '<wa-SM00000000000000000000000000000AAAA@whatsapp-forward>');
+  assert.equal(first.inReplyTo, undefined);
+  assert.equal(second.inReplyTo, first.messageId);
+  assert.deepEqual(second.references, [first.messageId]);
+  assert.match(second.text, /mensagem 2, continuação/);
+  assert.equal(first.attachments[0].filename, '1-documento.pdf');
+});
+
+test('se a API de mensagens falhar, o e-mail sai sozinho mesmo assim', async () => {
+  const sent = [];
+  const params = { ...base, AccountSid: SID, MessageSid: 'SM1', Body: 'oi' };
+  const rawBody = new URLSearchParams(params).toString();
+  const res = await handleWebhook({
+    url: URL_, rawBody, signature: computeTwilioSignature(TOKEN, URL_, parseForm(rawBody)), env: ENV,
+    sendMail: async (m) => sent.push(m), fetchImpl: async () => new Response('x', { status: 500 }), now: () => NOW, log: silent,
+  });
+  assert.equal(res.status, 200);
+  assert.equal(sent[0].subject, '[WA fwd] oi');
+});
+
+test('CONTEXT_GAP_MINUTES=0 desliga o agrupamento', async () => {
+  const sent = [];
+  const params = { ...base, AccountSid: SID, MessageSid: 'SM1', Body: 'oi' };
+  const rawBody = new URLSearchParams(params).toString();
+  await handleWebhook({
+    url: URL_, rawBody, signature: computeTwilioSignature(TOKEN, URL_, parseForm(rawBody)), env: { ...ENV, CONTEXT_GAP_MINUTES: '0' },
+    sendMail: async (m) => sent.push(m), fetchImpl: messagesApi([]), now: () => NOW, log: silent,
+  });
+  assert.equal(sent[0].subject, '[WA fwd] oi');
+  assert.equal(sent[0].messageId, undefined);
+});

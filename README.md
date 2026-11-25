@@ -2,7 +2,7 @@
 
 Você encaminha uma mensagem do WhatsApp para o número do bot. O Twilio chama este webhook, que baixa as mídias e manda tudo por e-mail para o seu Gmail com o assunto começando por **[WA fwd]**. O Claude lê de lá (busca `subject:"[WA fwd]"`).
 
-O código está pronto e testado (16 testes, `npm test`). Falta só a parte que depende das suas contas.
+O código está pronto e testado (21 testes, `npm test`). Falta só a parte que depende das suas contas.
 
 ## Como funciona
 
@@ -10,11 +10,12 @@ O código está pronto e testado (16 testes, `npm test`). Falta só a parte que 
 - **Imagem, PDF, Word, Excel, vídeo, contato:** viram anexos (até 20 MB por mensagem, por causa do limite do Gmail).
 - **Áudio:** chega como anexo `.ogg`. O Claude não escuta áudio, então fica arquivado mas não lido. Transcrição dá para acrescentar depois, se quiser.
 - **Localização:** vira link do Google Maps.
+- **Contexto depois:** encaminhe a mensagem e, em seguida, mande um texto seu explicando ("isso é a PI que o Marcelo pediu"). Tudo o que você mandar ao bot com menos de 30 minutos de intervalo cai no mesmo fio do Gmail, com o mesmo assunto, e o e-mail diz qual é a posição de cada mensagem na conversa. Um intervalo maior começa um fio novo. Para mudar o intervalo, use `CONTEXT_GAP_MINUTES` (0 desliga).
 - **Segurança:** só aceita chamadas assinadas pelo seu Twilio e só encaminha mensagens dos números em `ALLOWED_FROM`. Qualquer outro remetente é ignorado.
 
 Dois limites do próprio WhatsApp:
 - Uma mensagem encaminhada **não traz o autor original**. O e-mail marca "encaminhada", mas quem escreveu você precisa dizer (ou mandar um texto junto).
-- Encaminhar 5 mensagens de uma vez gera 5 e-mails.
+- Encaminhar 5 mensagens de uma vez gera 5 e-mails, mas no mesmo fio do Gmail.
 
 ## O que só você pode fazer
 
@@ -50,6 +51,7 @@ Projeto → **Settings → Environment Variables** (ambiente Production):
 | `GMAIL_APP_PASSWORD` | a senha de app do passo 2 |
 | `ALLOWED_FROM` | seu número, ex.: `whatsapp:+5511999999999` (vários separados por vírgula) |
 | `MAIL_TO` | opcional; padrão é o próprio `GMAIL_USER` |
+| `CONTEXT_GAP_MINUTES` | opcional; minutos de silêncio que encerram uma conversa (padrão 30; 0 desliga) |
 | `REPLY_ACK` | opcional; `1` faz o bot responder "✓ no e-mail" (custa US$0,005 por resposta) |
 
 Depois de salvar, vá em **Deployments → ⋯ → Redeploy**, porque as variáveis só valem num deploy novo.
