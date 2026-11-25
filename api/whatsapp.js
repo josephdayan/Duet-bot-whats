@@ -34,3 +34,12 @@ export async function POST(request) {
 export function GET() {
   return new Response('whatsapp-forward ok', { headers: { 'Content-Type': 'text/plain' } });
 }
+
+// Funções Node sem framework usam o export default com um handler fetch.
+export default {
+  fetch(request) {
+    if (request.method === 'GET' || request.method === 'HEAD') return GET();
+    if (request.method === 'POST') return POST(request);
+    return new Response('method not allowed', { status: 405, headers: { Allow: 'GET, HEAD, POST' } });
+  },
+};
