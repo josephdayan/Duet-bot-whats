@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-forward",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Recebe mensagens de WhatsApp pelo Twilio e encaminha por e-mail para o Gmail.",
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "nodemailer": "^6.10.1"
+  },
+  "devDependencies": {
+    "twilio": "^5.10.0"
+  }
+}
